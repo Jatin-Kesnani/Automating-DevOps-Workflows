@@ -158,6 +158,29 @@ def get_deployments_in_namespace(api: client.AppsV1Api, namespace: str = "defaul
         logger.error(f"An unexpected error occurred listing deployments: {e}", exc_info=True)
         return False, f"An unexpected error occurred while listing deployments in `{namespace}`."
 
+def restart_deployment(apps_v1_api, name: str, namespace: str = "default"):
+    """Performs a rollout restart on a K8s deployment."""
+    try:
+        # Patch the deployment with an annotation to trigger a restart
+        import datetime
+        patch = {
+            "spec": {
+                "template": {
+                    "metadata": {
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": datetime.datetime.utcnow().isoformat()
+                        }
+                    }
+                }
+            }
+        }
+
+        apps_v1_api.patch_namespaced_deployment(name, namespace, patch)
+        return True, f"Deployment `{name}` in namespace `{namespace}` has been restarted."
+    except client.exceptions.ApiException as e:
+        return False, f"API Error: {e.reason}"
+    except Exception as e:
+        return False, f"Error restarting deployment: {str(e)}"
 
 # Example of how to test functions directly (optional)
 if __name__ == "__main__":

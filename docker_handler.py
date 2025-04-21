@@ -71,6 +71,16 @@ def list_running_containers(client: docker.DockerClient):
         logger.error(f"An unexpected error occurred listing containers: {e}", exc_info=True)
         return False, "An unexpected error occurred while listing Docker containers."
 
+def get_container_logs(client: docker.DockerClient, container_name: str, lines=50):
+    """Returns last N lines of logs from a specific Docker container."""
+    try:
+        container = client.containers.get(container_name)
+        logs = container.logs(tail=lines).decode("utf-8")
+        return True, f"Logs from `{container_name}`:\n```{logs}```"
+    except docker.errors.NotFound:
+        return False, f"Container `{container_name}` not found."
+    except Exception as e:
+        return False, f"Error retrieving logs: {str(e)}"
 
 # Example of how to test functions directly (optional)
 if __name__ == "__main__":

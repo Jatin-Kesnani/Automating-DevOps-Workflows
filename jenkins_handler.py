@@ -6,6 +6,24 @@ from dotenv import load_dotenv
 # Load environment variables (needed if running this file standalone for testing)
 load_dotenv()
 
+def get_last_build_log(server: jenkins.Jenkins, job_name: str):
+    """Gets the console output log of the last completed build for a Jenkins job."""
+    try:
+        job_info = server.get_job_info(job_name)
+        last_build_number = job_info['lastCompletedBuild']['number']
+        console_output = server.get_build_console_output(job_name, last_build_number)
+
+        # Truncate if too long
+        max_chars = 3000
+        if len(console_output) > max_chars:
+            console_output = console_output[:max_chars] + "\n\n...(truncated)"
+
+        return True, f"Logs for `{job_name}` build #{last_build_number}:\n```{console_output}```"
+
+    except Exception as e:
+        return False, f"Failed to get logs for `{job_name}`: {str(e)}"
+
+
 # --- Jenkins Client Initialization ---
 def get_jenkins_client():
     """Initializes and returns a Jenkins client instance."""

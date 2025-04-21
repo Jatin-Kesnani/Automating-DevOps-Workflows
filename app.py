@@ -195,6 +195,43 @@ def handle_docker_ps_command(ack, body, command, respond, logger):
         logger.error(f"Failed to list Docker containers. Message: {message}")
         respond(f":x: {message}")
 
+@app.command("/jenkins-log")
+def handle_jenkins_log_command(ack, body, command, respond, logger):
+    ack()
+    job_name = command.get('text', '').strip()
+    if not job_name:
+        respond("Usage: `/jenkins-log [job_name]`")
+        return
+
+    success, message = jenkins_handler.get_last_build_log(jenkins_client, job_name)
+    respond(message)
+
+@app.command("/docker-logs")
+def handle_docker_logs_command(ack, body, command, respond, logger):
+    ack()
+    container_name = command.get('text', '').strip()
+    if not container_name:
+        respond("Usage: `/docker-logs [container_name]`")
+        return
+
+    success, message = docker_handler.get_container_logs(docker_client, container_name)
+    respond(message)
+
+@app.command("/k8s-restart-deployment")
+def handle_k8s_restart_deployment_command(ack, body, command, respond, logger):
+    ack()
+    parts = command.get('text', '').strip().split()
+    if len(parts) == 0:
+        respond("Usage: `/k8s-restart-deployment <deployment-name> [namespace]`")
+        return
+
+    name = parts[0]
+    namespace = parts[1] if len(parts) > 1 else "default"
+    # print("jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj")
+    # print(k8s_apps_v1_api, name, namespace)
+    success, message = k8s_handler.restart_deployment(k8s_apps_v1_api, name, namespace)
+    respond(message)
+
 
 # === Flask Setup (keep as before) ===
 flask_app = Flask(__name__)
