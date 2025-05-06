@@ -1,0 +1,43 @@
+Bot User OAuth Token
+xoxb-8761829867975-8761838578183-qjhwSaz3NaqmfNgcA1TLw8Ui
+
+Signing Secret
+08ff0c414d1db0db72f134e9aed345cd
+
+ngrok Recovery codes
+YJ7VA3JEXR
+K43TMRMPCJ
+7R9736TPJ7
+F9AR63ZFDQ
+JVQDUPXFG3
+6QEMMZSYG7
+3EEAJWYUEY
+UBA29GJ2PJ
+T29835GTBN
+EYMU2D7GMV
+
+ngrok config add-authtoken 2vwBBalHKF3HrJQqsVcNXnAH4H6_23UDrwGqsFc4ABvBBfyZL
+Authtoken saved to configuration file: C:\Users\MSI\AppData\Local/ngrok/ngrok.yml
+
+
+Jenkins initial setup is required. An admin user has been created and a password generated.
+Please use the following password to proceed to installation:
+727a557c01fc4c21aca0c714f44f7805
+This may also be found at: /var/jenkins_home/secrets/initialAdminPassword 
+
+
+chatops-bot-token
+114c09f9e8020321b93185799ab48ddc3b
+
+
+https://43a1-110-38-229-34.ngrok-free.app/slack/events
+
+
+
+
+
+# .gitignore file
+venv/
+__pycache__/
+*.pyc
+.env

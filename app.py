@@ -14,9 +14,12 @@ import k8s_handler # Import Kubernetes handler
 from kubernetes import client
 import docker_handler # Import Docker handler
 from docker.errors import DockerException # Import Docker exception
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
+
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL")
 
 # Initialize Slack Bolt app
 app = App(
@@ -232,6 +235,56 @@ def handle_k8s_restart_deployment_command(ack, body, command, respond, logger):
     success, message = k8s_handler.restart_deployment(k8s_apps_v1_api, name, namespace)
     respond(message)
 
+@app.command("/monitor-status")
+def handle_monitor_status(ack, command, respond, logger):
+    ack()
+
+    try:
+        queries = {
+            "Jenkins Failures (5m)": 'sum(rate(jenkins_job_last_build_result{result="FAILURE"}[5m]))',
+            "Pod Restarts (10m)": 'sum(increase(kube_pod_container_status_restarts_total[10m]))',
+            "Running Containers": 'count(container_last_seen{container_label_com_docker_swarm_service_name!=""})'
+        }
+
+        results = []
+        for label, query in queries.items():
+            res = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params={"query": query})
+            data = res.json()['data']['result']
+            value = float(data[0]['value'][1]) if data else 0
+            results.append(f"• *{label}*: `{value}`")
+
+        respond("📊 *CI/CD Monitoring Summary:*\n" + "\n".join(results))
+
+    except Exception as e:
+        logger.error(f"Error in /monitor-status: {str(e)}")
+        respond(f"❌ Error querying Prometheus: {str(e)}")
+
+@app.command("/monitor-pods")
+def handle_monitor_pods(ack, command, respond, logger):
+    ack()
+    try:
+        query = 'sum(increase(kube_pod_container_status_restarts_total[10m]))'
+        res = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params={"query": query})
+        data = res.json()['data']['result']
+        restarts = int(float(data[0]['value'][1])) if data else 0
+        respond(f"🚨 Pod Restarts in last 10 minutes: `{restarts}`")
+    except Exception as e:
+        logger.error(f"Error in /monitor-pods: {str(e)}")
+        respond(f"❌ Error querying Prometheus: {str(e)}")
+
+@app.command("/grafana-dashboard")
+def handle_grafana_dashboard(ack, command, respond, logger):
+    ack()
+
+    dashboards = {
+        "devopsbot": "http://localhost:3000/dashboards"
+    }
+
+    message = "*📊 Grafana Dashboards:*\n"
+    for name, url in dashboards.items():
+        message += f"• {name}: <{url}|Open>\n"
+
+    respond(message)
 
 # === Flask Setup (keep as before) ===
 flask_app = Flask(__name__)
