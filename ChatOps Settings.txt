@@ -33,6 +33,7 @@ chatops-bot-token
 https://43a1-110-38-229-34.ngrok-free.app/slack/events
 
 
+xapp-1-A08NLEE3U6S-8884984417985-17bc033dc6ae06b6f17a2e6bd90dafc7f7c27a5497bec7b898c4bf1623921f54
 
 
 
@@ -41,3 +42,8 @@ venv/
 __pycache__/
 *.pyc
 .env
+
+
+
+
+AIzaSyB3B3XUw3gS_Fzw8OVE0hpt6u97xxedd1Q
