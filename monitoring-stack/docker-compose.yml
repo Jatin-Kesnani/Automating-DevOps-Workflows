@@ -1,13 +1,6 @@
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./prometheus_data:/prometheus
+version: '3'
 
+services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -17,12 +10,17 @@ services:
       - ./grafana_data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
 
   node_exporter:
     image: prom/node-exporter:latest
     container_name: node_exporter
     ports:
       - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - monitoring
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -34,3 +32,10 @@ services:
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    driver: bridge

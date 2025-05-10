@@ -1,0 +1,25 @@
+pipeline {
+    agent any
+    stages {
+        stage('Build') {
+            steps {
+                sh 'npm install'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'npm test'
+            }
+        }
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t hello-node-app .'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'docker run -d -p 3000:3000 hello-node-app'
+            }
+        }
+    }
+}

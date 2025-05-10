@@ -1,32 +1,49 @@
 import os
+import docker
 from dotenv import load_dotenv
 from slack_bolt import App
-from slack_bolt.adapter.socket_mode import SocketModeHandler # ADD
+from slack_bolt.adapter.socket_mode import SocketModeHandler
+import logging
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 import jenkins_handler
-import jenkins # Import the jenkins library to catch its exceptions
+import jenkins
 import k8s_handler
-from kubernetes import client # Keep for type hints and exceptions
+from kubernetes import client
 import docker_handler
-from docker.errors import DockerException # Import Docker exception
-import requests # For Prometheus
-from prometheus_handler import query_prometheus
+from docker.errors import DockerException
+import requests
 
 import threading
 import time
 from slack_sdk import WebClient
 
+# Import new modules
+from ai_operations import AIOpsAssistant
+from advanced_monitoring import AdvancedMonitoring
+
+# Import the WebsiteHandler
+from website_handler import WebsiteHandler
+
 # Load environment variables from .env file
 load_dotenv()
-PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL")
 
-# Initialize Slack Bolt app (this part remains the same)
+# Initialize Slack Bolt app
 app = App(
     token=os.environ.get("SLACK_BOT_TOKEN"),
-    signing_secret=os.environ.get("SLACK_SIGNING_SECRET") # Signing secret still used for some features
+    signing_secret=os.environ.get("SLACK_SIGNING_SECRET")
 )
 
-# --- Client Initializations (keep as is) ---
+# Initialize AI and Monitoring
+ai_assistant = AIOpsAssistant()
+advanced_monitor = AdvancedMonitoring()
+
 # Initialize Jenkins client
 jenkins_client = None
 try:
@@ -54,6 +71,8 @@ try:
 except Exception as e:
     print(f"ERROR: Could not initialize Docker client on startup - {e}")
 
+# Initialize WebsiteHandler
+website_handler = WebsiteHandler(docker_client)
 
 # === Event Handlers (like app_mention) and Command Handlers remain THE SAME ===
 # Your @app.event("app_mention") and all @app.command(...) handlers
@@ -61,11 +80,57 @@ except Exception as e:
 
 @app.event("app_mention")
 def handle_app_mention_events(body, say, logger):
-    # ... (Your existing code) ...
     logger.info("Received app_mention event")
     message_text = body["event"]["text"]
     user_id = body["event"]["user"]
-    response_text = f"Hi <@{user_id}>! You mentioned me. You said: '{message_text}'"
+    
+    # Check if the message is requesting command list
+    if "ls-commands" in message_text.lower():
+        # Define command categories and their commands
+        commands = {
+            "🤖 AI-Powered Commands": [
+                "/ai-analyze-logs <source> - Analyze logs from Jenkins, K8s, or Docker",
+                "/ai-optimize - Get AI-powered system optimization suggestions",
+                "/system-health - Get comprehensive system health score",
+                "/detect-anomalies <metric> [duration] - Detect anomalies in metrics",
+                "/capacity-planning - Get capacity planning insights"
+            ],
+            "🔄 CI/CD Commands": [
+                "/jenkins-trigger <job_name> [params] - Trigger Jenkins jobs",
+                "/jenkins-status <job_name> - Check Jenkins job status",
+                "/jenkins-log <job_name> [build_number] - Get Jenkins build logs",
+                "/jenkins-deploy <job_name> - Deploy application using Jenkins"
+            ],
+            "🐳 Docker Commands": [
+                "/docker-ps - List running Docker containers",
+                "/docker-logs <container_name> - Get container logs",
+                "/docker-deploy <image_name> - Deploy container using Docker"
+            ],
+            "☸️ Kubernetes Commands": [
+                "/k8s-pods [namespace] - List Kubernetes pods",
+                "/k8s-deployments [namespace] - List Kubernetes deployments",
+                "/k8s-restart-deployment <deployment-name> [namespace] - Restart a deployment"
+            ],
+            "📊 Monitoring Commands": [
+                "/monitor-status - Get CI/CD monitoring summary",
+                "/monitor-pods - Check pod status",
+                "/grafana-dashboard - Access Grafana dashboards"
+            ]
+        }
+        
+        # Build the response message
+        response = "📋 *Available ChatOps Commands:*\n\n"
+        for category, cmd_list in commands.items():
+            response += f"*{category}*\n"
+            for cmd in cmd_list:
+                response += f"• `{cmd}`\n"
+            response += "\n"
+        
+        response += "💡 *Tip:* Use `/help <command>` for detailed information about a specific command."
+        say(response)
+    else:
+        # Default response for other mentions
+        response_text = f"Hi <@{user_id}>! You mentioned me. You said: '{message_text}'\n\nUse `@chatops ls-commands` to see all available commands."
     say(response_text)
 
 @app.command("/jenkins-trigger")
@@ -204,125 +269,349 @@ def handle_k8s_restart_deployment_command(ack, body, command, respond, logger):
     else: respond(f":x: {message}")
 
 
-@app.command("/monitor-status") # From your provided code
+@app.command("/monitor-status")
 def handle_monitor_status(ack, command, respond, logger):
     ack()
     logger.info(f"Received /monitor-status command: {command}")
-    if not PROMETHEUS_URL:
-        respond("Prometheus URL not configured. Please set PROMETHEUS_URL in .env")
-        return
-    try:
-        queries = {
-            "Jenkins Failures (5m)": 'sum(rate(jenkins_job_last_build_result{result="FAILURE"}[5m]))', # May need Jenkins Prometheus plugin
-            "Pod Restarts (10m)": 'sum(increase(kube_pod_container_status_restarts_total[10m]))',
-            "Running Containers (Swarm)": 'count(container_last_seen{container_label_com_docker_swarm_service_name!=""})', # This is for Swarm
-            "Total K8s Pods": 'count(kube_pod_info)', # Example generic K8s query
-        }
-        results = []
-        for label, query in queries.items():
-            # Use a timeout for requests
-            res = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params={"query": query}, timeout=10)
-            res.raise_for_status() # Raise an exception for HTTP errors
-            data = res.json().get('data', {}).get('result', [])
-            value = float(data[0]['value'][1]) if data and len(data) > 0 and len(data[0].get('value', [])) > 1 else 0
-            results.append(f"• *{label}*: `{value:.2f}`") # Format float
-
-        respond("📊 *CI/CD Monitoring Summary (via Prometheus):*\n" + "\n".join(results))
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Prometheus query failed (RequestException): {e}")
-        respond(f"❌ Error querying Prometheus: Network or HTTP error. {e}")
-    except Exception as e:
-        logger.error(f"Error in /monitor-status: {e}", exc_info=True)
-        respond(f"❌ An unexpected error occurred querying Prometheus: {e}")
-
-
-# @app.command("/monitor-pods") # From your provided code
-# def handle_monitor_pods(ack, command, respond, logger):
-#     ack()
-#     logger.info(f"Received /monitor-pods command: {command}")
-#     if not PROMETHEUS_URL:
-#         respond("Prometheus URL not configured."); return
-#     try:
-#         query = 'sum(increase(kube_pod_container_status_restarts_total[10m])) by (namespace)' # Example: group by namespace
-#         res = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params={"query": query}, timeout=10)
-#         res.raise_for_status()
-#         data = res.json().get('data', {}).get('result', [])
-        
-#         if not data:
-#             respond("📈 No pod restart data found in the last 10 minutes.")
-#             return
-
-#         results = ["Pod Restarts in last 10 minutes:"]
-#         for item in data:
-#             namespace = item.get('metric', {}).get('namespace', 'N/A')
-#             restarts = int(float(item.get('value', [0, '0'])[1]))
-#             results.append(f"  • Namespace `{namespace}`: `{restarts}` restarts")
-        
-#         respond("\n".join(results))
-
-#     except requests.exceptions.RequestException as e:
-#         logger.error(f"Prometheus query failed for /monitor-pods: {e}")
-#         respond(f"❌ Error querying Prometheus for pod restarts: Network or HTTP error. {e}")
-#     except Exception as e:
-#         logger.error(f"Error in /monitor-pods: {e}", exc_info=True)
-#         respond(f"❌ An unexpected error occurred: {e}")
-
-
-@app.command("/grafana-dashboard") # From your provided code
-def handle_grafana_dashboard(ack, command, respond, logger):
-    ack()
-    logger.info(f"Received /grafana-dashboard command: {command}")
-    # Consider making this configurable via .env or a config file
-    grafana_base_url = os.environ.get("GRAFANA_URL", "http://localhost:3000") # Default if not in .env
-    dashboards = {
-        "Kubernetes Cluster Overview": f"{grafana_base_url}/d/deldkxqfcvh1cd/kubernetes-cluster-monitoring-via-prometheus?orgId=1&from=now-6h&to=now&timezone=browser", # Example common dashboard
-        "Jenkins Overview": f"{grafana_base_url}/d/jenkins-overview/jenkins-overview" # Example
-    }
-    message = "*📊 Grafana Dashboards:*\n"
-    for name, url in dashboards.items():
-        message += f"• {name}: <{url}|Open>\n"
-    respond(message)
+    respond("Monitoring functionality has been removed from this version of the bot.")
 
 @app.command("/monitor-pods")
 def handle_monitor_pods(ack, respond, command):
     ack()
-    query = 'kube_pod_status_phase{phase!="Running"}'
-    result = query_prometheus(query)
-    if isinstance(result, str):  # If error
-        respond(result)
-    else:
-        if not result:
-            respond("All pods are running fine.")
+    respond("Monitoring functionality has been removed from this version of the bot.")
+
+@app.command("/grafana-dashboard")
+def handle_grafana_dashboard(ack, command, respond, logger):
+    ack()
+    logger.info(f"Received /grafana-dashboard command: {command}")
+    respond("Monitoring functionality has been removed from this version of the bot.")
+
+# New command handlers for AI and advanced monitoring features
+@app.command("/ai-analyze-logs")
+def handle_ai_analyze_logs(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /ai-analyze-logs command: {command}")
+    
+    # Get logs from the specified source
+    source = command.get('text', '').strip()
+    if not source:
+        respond("Please specify the log source (e.g., 'jenkins', 'k8s', 'docker')")
+        return
+    
+    try:
+        logs = ""
+        if source == "jenkins":
+            success, logs = jenkins_handler.get_recent_logs(jenkins_client)
+        elif source == "k8s":
+            success, logs = k8s_handler.get_recent_logs(k8s_core_v1_api)
+        elif source == "docker":
+            success, logs = docker_handler.get_recent_logs(docker_client)
         else:
-            msg = "Pods not in running state:\n"
-            for item in result:
-                pod = item['metric'].get('pod', 'Unknown')
-                status = item['metric'].get('phase', 'Unknown')
-                msg += f"- {pod}: {status}\n"
-            respond(msg)
+            respond(f"Unsupported log source: {source}")
+            return
+        
+        if not success:
+            respond(f"Failed to fetch logs from {source}")
+            return
+        
+        # Analyze logs using AI
+        result = ai_assistant.analyze_logs(logs)
+        if result["status"] == "success":
+            respond(f"🤖 *AI Analysis of {source} logs:*\n{result['analysis']}")
+        else:
+            respond(f"❌ Error analyzing logs: {result['analysis']}")
+    except Exception as e:
+        logger.error(f"Error in AI log analysis: {str(e)}")
+        respond(f"❌ An error occurred: {str(e)}")
 
-def monitor_loop():
-    client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
-    while True:
-        alerts = query_prometheus('ALERTS{alertstate="firing"}')
-        if alerts:
-            for alert in alerts:
-                msg = alert['labels'].get('alertname', 'Unknown Alert')
-                client.chat_postMessage(channel="#alerts", text=f"🔥 Alert: {msg}")
-        time.sleep(300)  # Check every 5 mins
+@app.command("/system-health")
+def handle_system_health(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /system-health command: {command}")
+    
+    try:
+        health_data = advanced_monitor.get_system_health_score()
+        if health_data["status"] == "success":
+            metrics = health_data["metrics"]
+            health_score = health_data["health_score"]
+            
+            # Format the response
+            response = f"🏥 *System Health Score: {health_score:.1f}%*\n\n"
+            response += "*Detailed Metrics:*\n"
+            for metric, value in metrics.items():
+                response += f"• {metric.replace('_', ' ').title()}: {value:.1f}\n"
+            
+            respond(response)
+        else:
+            respond(f"❌ Error getting system health: {health_data['message']}")
+    except Exception as e:
+        logger.error(f"Error in system health check: {str(e)}")
+        respond(f"❌ An error occurred: {str(e)}")
 
-threading.Thread(target=monitor_loop, daemon=True).start()
+@app.command("/detect-anomalies")
+def handle_detect_anomalies(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /detect-anomalies command: {command}")
+    
+    args = command.get('text', '').strip().split()
+    if len(args) < 1:
+        respond("Usage: /detect-anomalies <metric_name> [duration]")
+        return
+    
+    metric_name = args[0]
+    duration = args[1] if len(args) > 1 else "1h"
+    
+    try:
+        result = advanced_monitor.detect_anomalies(metric_name, duration)
+        if result["status"] == "success":
+            anomalies = result["anomalies"]
+            stats = result["statistics"]
+            
+            response = f"🔍 *Anomaly Detection for {metric_name}*\n\n"
+            response += f"*Statistics:*\n"
+            response += f"• Mean: {stats['mean']:.2f}\n"
+            response += f"• Std Dev: {stats['std']:.2f}\n"
+            response += f"• Min: {stats['min']:.2f}\n"
+            response += f"• Max: {stats['max']:.2f}\n\n"
+            
+            if anomalies:
+                response += f"*Detected Anomalies:*\n"
+                for anomaly in anomalies[:5]:  # Show top 5 anomalies
+                    response += f"• Time: {anomaly['timestamp']}, Value: {anomaly['value']:.2f}\n"
+                if len(anomalies) > 5:
+                    response += f"... and {len(anomalies) - 5} more anomalies"
+            else:
+                response += "No anomalies detected in the specified time range."
+            
+            respond(response)
+        else:
+            respond(f"❌ Error detecting anomalies: {result['message']}")
+    except Exception as e:
+        logger.error(f"Error in anomaly detection: {str(e)}")
+        respond(f"❌ An error occurred: {str(e)}")
 
-# --- Remove Flask Setup ---
-# flask_app = Flask(__name__) # REMOVE (Corrected from your 'name')
-# handler = SlackRequestHandler(app) # REMOVE
+@app.command("/capacity-planning")
+def handle_capacity_planning(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /capacity-planning command: {command}")
+    
+    try:
+        insights = advanced_monitor.get_capacity_planning_insights()
+        if insights["status"] == "success":
+            response = "📊 *Capacity Planning Insights*\n\n"
+            
+            for resource, data in insights["insights"].items():
+                response += f"*{resource.upper()}*\n"
+                response += f"• Current Usage: {data['current_usage']:.2f}\n"
+                response += f"• Growth Rate: {data['growth_rate']:.1f}%\n"
+                response += f"• Predicted Usage: {data['predicted_usage']:.2f}\n"
+                response += f"• Recommendation: {data['recommendation']}\n\n"
+            
+            respond(response)
+        else:
+            respond(f"❌ Error getting capacity insights: {insights['message']}")
+    except Exception as e:
+        logger.error(f"Error in capacity planning: {str(e)}")
+        respond(f"❌ An error occurred: {str(e)}")
 
-# @flask_app.route("/slack/events", methods=["POST"]) # REMOVE
-# def slack_events():
-#    # Your url_verification and handler.handle(request) logic
-#    # This is handled differently by SocketModeHandler
-#    return handler.handle(request)
+@app.command("/ai-optimize")
+def handle_ai_optimize(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /ai-optimize command: {command}")
+    
+    try:
+        # Get current system metrics
+        health_data = advanced_monitor.get_system_health_score()
+        if health_data["status"] != "success":
+            respond(f"❌ Error getting system metrics: {health_data['message']}")
+            return
+        
+        # Get optimization suggestions from AI
+        result = ai_assistant.suggest_optimization(health_data["metrics"])
+        if result["status"] == "success":
+            respond(f"🤖 *AI Optimization Suggestions:*\n{result['suggestions']}")
+        else:
+            respond(f"❌ Error getting optimization suggestions: {result['suggestions']}")
+    except Exception as e:
+        logger.error(f"Error in AI optimization: {str(e)}")
+        respond(f"❌ An error occurred: {str(e)}")
 
+# Add a help command handler
+@app.command("/help")
+def handle_help_command(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /help command: {command}")
+    
+    # Get the specific command to get help for
+    cmd = command.get('text', '').strip()
+    
+    # Define detailed help information for each command
+    help_info = {
+        "ai-analyze-logs": {
+            "description": "Analyze logs using AI to identify patterns and issues",
+            "usage": "/ai-analyze-logs <source>",
+            "examples": [
+                "/ai-analyze-logs jenkins",
+                "/ai-analyze-logs k8s",
+                "/ai-analyze-logs docker"
+            ],
+            "notes": "The AI will analyze logs for error patterns, performance issues, and security concerns."
+        },
+        "jenkins-trigger": {
+            "description": "Trigger a Jenkins job with optional parameters",
+            "usage": "/jenkins-trigger <job_name> [param1=value1 param2=value2 ...]",
+            "examples": [
+                "/jenkins-trigger build-app",
+                "/jenkins-trigger deploy-app environment=prod version=1.0.0"
+            ],
+            "notes": "Parameters should be in key=value format, separated by spaces."
+        },
+        "jenkins-deploy": {
+            "description": "Deploy an application using Jenkins pipeline",
+            "usage": "/jenkins-deploy <job_name>",
+            "examples": [
+                "/jenkins-deploy website-deploy",
+                "/jenkins-deploy app-deploy"
+            ],
+            "notes": "This will trigger the specified Jenkins deployment job."
+        },
+        "docker-ps": {
+            "description": "List all running Docker containers",
+            "usage": "/docker-ps",
+            "examples": [
+                "/docker-ps"
+            ],
+            "notes": "Shows container ID, image, status, and names."
+        },
+        "docker-deploy": {
+            "description": "Deploy a Docker container",
+            "usage": "/docker-deploy <image_name>",
+            "examples": [
+                "/docker-deploy website",
+                "/docker-deploy app"
+            ],
+            "notes": "This will deploy the specified Docker image."
+        },
+        "k8s-pods": {
+            "description": "List pods in a Kubernetes namespace",
+            "usage": "/k8s-pods [namespace]",
+            "examples": [
+                "/k8s-pods",
+                "/k8s-pods production"
+            ],
+            "notes": "If namespace is not specified, defaults to 'default'."
+        }
+    }
+    
+    if not cmd:
+        # If no specific command is requested, show general help
+        respond("Please specify a command to get help for. Usage: `/help <command>`\n\nAvailable commands:\n" + 
+                "\n".join([f"• `{cmd}`" for cmd in help_info.keys()]))
+        return
+    
+    # Get help for specific command
+    if cmd in help_info:
+        info = help_info[cmd]
+        response = f"*Help for `{cmd}`*\n\n"
+        response += f"*Description:* {info['description']}\n"
+        response += f"*Usage:* `{info['usage']}`\n"
+        response += "*Examples:*\n" + "\n".join([f"• `{ex}`" for ex in info['examples']]) + "\n"
+        response += f"*Notes:* {info['notes']}"
+        respond(response)
+    else:
+        respond(f"Sorry, I don't have help information for the command `{cmd}`.\n\nAvailable commands:\n" + 
+                "\n".join([f"• `{cmd}`" for cmd in help_info.keys()]))
+
+@app.command("/docker-deploy")
+def handle_docker_deploy_command(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /docker-deploy command: {command}")
+    
+    image_name = command.get('text', '').strip()
+    if not image_name:
+        respond("Please provide the image name. Usage: `/docker-deploy <image_name>`")
+        return
+    
+    if not docker_client:
+        respond("Sorry, Docker connection failed. Check logs.")
+        return
+    
+    try:
+        # Pull the image if it doesn't exist locally
+        try:
+            docker_client.images.get(image_name)
+        except docker.errors.ImageNotFound:
+            logger.info(f"Image {image_name} not found locally, pulling...")
+            docker_client.images.pull(image_name)
+        
+        # Stop and remove existing container if it exists
+        container_name = f"{image_name}-container"
+        try:
+            existing_container = docker_client.containers.get(container_name)
+            logger.info(f"Stopping and removing existing container: {container_name}")
+            existing_container.stop()
+            existing_container.remove()
+        except docker.errors.NotFound:
+            pass  # Container doesn't exist, which is fine
+        
+        # Run the container
+        container = docker_client.containers.run(
+            image_name,
+            detach=True,
+            ports={'80/tcp': 80},  # Map container port 80 to host port 80
+            name=container_name
+        )
+        
+        respond(f"✅ Successfully deployed {image_name} container. Container ID: {container.id}")
+    except Exception as e:
+        logger.error(f"Error deploying Docker container: {str(e)}")
+        respond(f"❌ Error deploying container: {str(e)}")
+
+@app.command("/jenkins-deploy")
+def handle_jenkins_deploy_command(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /jenkins-deploy command: {command}")
+    
+    job_name = command.get('text', '').strip()
+    if not job_name:
+        respond("Please provide the Jenkins job name. Usage: `/jenkins-deploy <job_name>`")
+        return
+    
+    if not jenkins_client:
+        respond("Sorry, Jenkins connection failed. Check logs.")
+        return
+    
+    try:
+        # Trigger the deployment job
+        success, message = jenkins_handler.trigger_jenkins_job(jenkins_client, job_name)
+        if success:
+            respond(f"✅ Successfully triggered deployment job: {job_name}\n{message}")
+        else:
+            respond(f"❌ Failed to trigger deployment job: {message}")
+    except Exception as e:
+        logger.error(f"Error triggering Jenkins deployment job: {str(e)}")
+        respond(f"❌ Error: {str(e)}")
+
+@app.command("/deploy-website")
+def handle_deploy_website(ack, body, command, respond, logger):
+    ack()
+    logger.info(f"Received /deploy-website command: {command}")
+    
+    try:
+        # Get website name from command text, default to "my-website" if not provided
+        website_name = command.get('text', '').strip() or "my-website"
+        
+        # Deploy the website
+        success, message = website_handler.deploy_website(website_name)
+        
+        if success:
+            respond(message)
+        else:
+            respond(f"❌ {message}")
+            
+    except Exception as e:
+        logger.error(f"Error in deploy-website command: {str(e)}", exc_info=True)
+        respond(f"❌ An error occurred while deploying the website: {str(e)}")
 
 # === Main Execution Block for Socket Mode ===
 if __name__ == "__main__":
@@ -333,9 +622,6 @@ if __name__ == "__main__":
          print("\nWARNING: Kubernetes client not initialized/config failed. K8s commands will fail.\n")
     if not docker_client:
          print("\nWARNING: Docker client not initialized. Docker commands will fail.\n")
-    if not PROMETHEUS_URL:
-        print("\nWARNING: PROMETHEUS_URL not set. Prometheus monitoring commands will fail.\n")
-
 
     # Start Socket Mode handler
     # Ensure SLACK_APP_TOKEN (xapp-...) is in your .env file
@@ -344,4 +630,5 @@ if __name__ == "__main__":
         print("ERROR: SLACK_APP_TOKEN not found in environment variables. Socket Mode cannot start.")
     else:
         print("INFO: Starting ChatOps bot in Socket Mode...")
-        SocketModeHandler(app, app_token).start()
+        handler = SocketModeHandler(app, app_token)
+        handler.start()

@@ -182,6 +182,46 @@ def restart_deployment(apps_v1_api, name: str, namespace: str = "default"):
     except Exception as e:
         return False, f"Error restarting deployment: {str(e)}"
 
+def get_recent_logs(core_v1_api, namespace="default", max_lines=100):
+    """
+    Get recent logs from Kubernetes pods.
+    Returns logs from all pods in the specified namespace.
+    """
+    try:
+        if not core_v1_api:
+            return False, "Kubernetes client not initialized"
+        
+        # Get all pods in the namespace
+        pods = core_v1_api.list_namespaced_pod(namespace)
+        if not pods.items:
+            return False, f"No pods found in namespace '{namespace}'. Please deploy your application first.\n\nTo deploy a sample application, you can use:\n```kubectl create deployment nginx --image=nginx\nkubectl expose deployment nginx --port=80 --type=NodePort```"
+        
+        all_logs = []
+        for pod in pods.items:
+            pod_name = pod.metadata.name
+            try:
+                # Get logs for each container in the pod
+                for container in pod.spec.containers:
+                    container_name = container.name
+                    logs = core_v1_api.read_namespaced_pod_log(
+                        name=pod_name,
+                        namespace=namespace,
+                        container=container_name,
+                        tail_lines=max_lines
+                    )
+                    all_logs.append(f"=== Pod: {pod_name}, Container: {container_name} ===\n{logs}")
+            except Exception as e:
+                all_logs.append(f"=== Pod: {pod_name} ===\nError getting logs: {str(e)}")
+        
+        if not all_logs:
+            return False, "No logs found in any pods. The pods might be too new or not generating logs yet."
+        
+        return True, "\n\n".join(all_logs)
+        
+    except Exception as e:
+        logger.error(f"Error getting Kubernetes logs: {str(e)}")
+        return False, f"Error getting logs: {str(e)}"
+
 # Example of how to test functions directly (optional)
 if __name__ == "__main__":
     print("Attempting to load K8s config for direct testing...")

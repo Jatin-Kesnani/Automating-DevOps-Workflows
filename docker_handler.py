@@ -2,6 +2,9 @@
 import docker
 from docker.errors import DockerException
 import logging
+import os
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
@@ -10,22 +13,47 @@ logger = logging.getLogger(__name__)
 # --- Docker Client Initialization ---
 def get_docker_client():
     """
-    Initializes and returns a Docker client instance connected via the default socket/pipe.
+    Initializes and returns a Docker client instance with proper TLS configuration.
+    Supports both local and remote Docker daemons.
     Returns None if connection fails.
     """
     try:
-        # Connects using the default socket or named pipe (most common)
-        # For remote daemons, use docker.DockerClient(base_url='tcp://host:port')
-        client = docker.from_env()
+        # Get Docker configuration from environment variables
+        docker_host = os.environ.get('DOCKER_HOST', 'unix://var/run/docker.sock')
+        tls_verify = os.environ.get('DOCKER_TLS_VERIFY', '0').lower() in ('1', 'true', 'yes')
+        cert_path = os.environ.get('DOCKER_CERT_PATH')
+        
+        # Configure TLS if required
+        tls_config = None
+        if tls_verify and cert_path:
+            cert_path = Path(cert_path)
+            tls_config = docker.tls.TLSConfig(
+                client_cert=(cert_path / 'cert.pem', cert_path / 'key.pem'),
+                ca_cert=cert_path / 'ca.pem',
+                verify=True
+            )
+        
+        # Initialize client with appropriate configuration
+        if docker_host.startswith('unix://'):
+            # Local Docker daemon
+            client = docker.from_env()
+        else:
+            # Remote Docker daemon
+            client = docker.DockerClient(
+                base_url=docker_host,
+                tls=tls_config
+            )
+        
         # Test the connection
         client.ping()
-        logger.info("Successfully connected to Docker daemon.")
+        logger.info(f"Successfully connected to Docker daemon at {docker_host}")
         return client
+        
     except DockerException as e:
         logger.error(f"Error connecting to Docker daemon: {e}")
         logger.error("Please ensure the Docker daemon is running and accessible.")
         return None
-    except Exception as e: # Catch other potential errors during initialization
+    except Exception as e:
         logger.error(f"An unexpected error occurred initializing Docker client: {e}")
         return None
 
@@ -82,14 +110,45 @@ def get_container_logs(client: docker.DockerClient, container_name: str, lines=5
     except Exception as e:
         return False, f"Error retrieving logs: {str(e)}"
 
-# Example of how to test functions directly (optional)
-if __name__ == "__main__":
-    print("Attempting to connect to Docker for direct testing...")
-    docker_client = get_docker_client()
-
-    if docker_client:
-        print("\n--- Testing Container List ---")
-        success, message = list_running_containers(docker_client)
-        print(f"Success: {success}\n{message}")
-    else:
-        print("Could not connect to Docker daemon. Aborting tests.")
+def get_recent_logs(client, container_id=None, max_lines=100):
+    """
+    Get recent logs from Docker containers.
+    If container_id is provided, gets logs for that specific container.
+    Otherwise, gets logs from all running containers.
+    """
+    try:
+        if not client:
+            return False, "Docker client not initialized"
+        
+        if container_id:
+            # Get logs for specific container
+            try:
+                container = client.containers.get(container_id)
+                logs = container.logs(tail=max_lines, timestamps=True).decode('utf-8')
+                return True, logs
+            except docker.errors.NotFound:
+                return False, f"Container {container_id} not found. Use '/docker-ps' to see available containers."
+            except docker.errors.APIError as e:
+                return False, f"Error getting logs for container {container_id}: {str(e)}"
+        else:
+            # Get logs from all running containers
+            containers = client.containers.list()
+            if not containers:
+                return False, "No running containers found. To start a sample container, you can use:\n```docker run -d --name my-nginx nginx```"
+            
+            all_logs = []
+            for container in containers:
+                try:
+                    logs = container.logs(tail=max_lines, timestamps=True).decode('utf-8')
+                    all_logs.append(f"=== Container: {container.name} ({container.id[:12]}) ===\n{logs}")
+                except docker.errors.APIError as e:
+                    all_logs.append(f"=== Container: {container.name} ({container.id[:12]}) ===\nError getting logs: {str(e)}")
+            
+            if not all_logs:
+                return False, "No logs found in any containers. The containers might be too new or not generating logs yet."
+            
+            return True, "\n\n".join(all_logs)
+            
+    except Exception as e:
+        logger.error(f"Error getting Docker logs: {str(e)}")
+        return False, f"Error getting logs: {str(e)}"

@@ -1,0 +1,17 @@
+{
+	"ulid": "01JTTZW54P75HMEFEJR59BAKWE",
+	"minTime": 1746799233568,
+	"maxTime": 1746806400000,
+	"stats": {
+		"numSamples": 2504476,
+		"numSeries": 6006,
+		"numChunks": 21317
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01JTTZW54P75HMEFEJR59BAKWE"
+		]
+	},
+	"version": 1
+}

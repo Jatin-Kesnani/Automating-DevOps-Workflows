@@ -175,6 +175,66 @@ def get_build_log(server: jenkins.Jenkins, job_name: str, build_number_str: str 
         return False, f"An unexpected error occurred while getting logs for `{job_name}` build `{build_number_str}`."
 
 
+def get_recent_logs(client, job_name=None, build_number=None, max_lines=100):
+    """
+    Get recent logs from Jenkins.
+    If job_name is provided, gets logs for that specific job.
+    Otherwise, gets logs from recent builds across all jobs.
+    """
+    try:
+        if not client:
+            return False, "Jenkins client not initialized"
+        
+        # Get all jobs first to check if any exist
+        all_jobs = client.get_jobs()
+        if not all_jobs:
+            return False, "No Jenkins jobs found. Please create a job first."
+        
+        if job_name:
+            # Check if the specified job exists
+            job_exists = any(job['name'] == job_name for job in all_jobs)
+            if not job_exists:
+                return False, f"Job '{job_name}' not found. Available jobs: {', '.join(job['name'] for job in all_jobs)}"
+            
+            # Get logs for specific job
+            try:
+                job = client.get_job(job_name)
+                if not build_number:
+                    build = job.get_last_build()
+                else:
+                    build = job.get_build(int(build_number))
+                
+                log = build.get_console_output()
+                return True, log
+            except jenkins.JenkinsException as e:
+                return False, f"Error getting logs for job {job_name}: {str(e)}"
+        else:
+            # Get logs from recent builds across all jobs
+            recent_logs = []
+            
+            for job_info in all_jobs:
+                try:
+                    job = client.get_job(job_info['name'])
+                    last_build = job.get_last_build()
+                    if last_build:
+                        log = last_build.get_console_output()
+                        recent_logs.append(f"=== {job_info['name']} (Build #{last_build.get_number()}) ===\n{log}")
+                except jenkins.JenkinsException:
+                    continue
+                
+                if len(recent_logs) >= 5:  # Limit to 5 most recent jobs
+                    break
+            
+            if not recent_logs:
+                return False, "No recent builds found. Please trigger a build first."
+            
+            return True, "\n\n".join(recent_logs)
+            
+    except Exception as e:
+        logger.error(f"Error getting Jenkins logs: {str(e)}")
+        return False, f"Error getting logs: {str(e)}"
+
+
 # Example of how to test functions directly (optional)
 if __name__ == "__main__": # Corrected from 'name'
     logger.info("Attempting direct test of jenkins_handler functions...")
