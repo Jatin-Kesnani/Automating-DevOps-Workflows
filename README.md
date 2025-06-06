@@ -118,11 +118,3 @@ We welcome contributions to enhance the capabilities of this project!
 3.  Commit your changes (`git commit -m 'Add some amazing feature'`).
 4.  Push to the branch (`git push origin feature/your-feature-name`).
 5.  Open a Pull Request.
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for more details.
-
-## Support
-
-If you encounter any issues or have questions, please open an issue in the GitHub repository or reach out to the project maintainers.
