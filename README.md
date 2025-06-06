@@ -87,6 +87,7 @@ Interact with your DevOps environment using simple Slack commands.
 * `/capacity-planning`: Receive AI-generated insights for capacity planning.
 
 ## Architecture
+![Architecture Diagram](architecture.png)
 
 The solution is designed with a modular and scalable architecture:
 
