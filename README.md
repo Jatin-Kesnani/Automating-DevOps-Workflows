@@ -2,6 +2,8 @@
 
 This project provides a sophisticated ChatOps solution designed to streamline and automate modern DevOps workflows. By integrating with Slack, it offers a centralized platform for managing CI/CD pipelines, containerized environments, and monitoring systems, all enhanced with powerful AI capabilities. This solution moves beyond simple command-and-response to deliver a comprehensive tool that boosts efficiency, provides deep system insights, and proactively addresses potential issues.
 
+👉 [Click here to view demo](https://www.youtube.com/watch?v=wpmvBFQLH_4)
+
 ## Features
 
 ### Core ChatOps Features
