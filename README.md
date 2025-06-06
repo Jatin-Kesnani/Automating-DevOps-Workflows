@@ -92,12 +92,11 @@ Interact with your DevOps environment using simple Slack commands.
 The solution is designed with a modular and scalable architecture:
 
 * `app.py`: The core application that handles Slack commands and event routing.
-* `ai_operations.py`: Contains the logic for all AI-powered features using the Gemini API.
+* `gemini_handler.py`: Contains the logic for all AI-powered features using the Gemini API.
 * `advanced_monitoring.py`: Implements advanced monitoring and health scoring functionalities.
 * `jenkins_handler.py`: Manages all interactions with the Jenkins API.
 * `k8s_handler.py`: Handles operations related to the Kubernetes cluster.
 * `docker_handler.py`: Manages Docker container operations.
-* `prometheus_handler.py`: Integrates with Prometheus for metrics and alerts.
 
 ## Security Considerations
 
