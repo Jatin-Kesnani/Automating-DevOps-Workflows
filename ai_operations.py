@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configure Gemini
-GEMINI_API_KEY = "AIzaSyB3B3XUw3gS_Fzw8OVE0hpt6u97xxedd1Q"
+GEMINI_API_KEY = "your-api-key"
 genai.configure(api_key=GEMINI_API_KEY)
 
 class AIOpsAssistant:
